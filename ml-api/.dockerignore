@@ -1,0 +1,19 @@
+# Docker ignore file for Hugging Face Spaces
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache
+.coverage
+.nyc_output
+*.log
+.git
+.gitignore
+README.md
+.env
+.env.local
+.env.*.local
+logs/*
+!logs/.gitkeep

@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "client/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "build"
+      }
+    },
+    {
+      "src": "api/server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/server.js"
+    },
+    {
+      "src": "/health",
+      "dest": "/api/server.js"
+    },
+    {
+      "src": "/test",
+      "dest": "/api/server.js"
+    },
+    {
+      "src": "/static/(.*)",
+      "dest": "/client/static/$1"
+    },
+    {
+      "src": "/asset/(.*)",
+      "dest": "/client/asset/$1"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "/client/manifest.json"
+    },
+    {
+      "src": "/robots.txt",
+      "dest": "/client/robots.txt"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "/client/favicon.ico"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/client/index.html"
+    }
+  ]
+}

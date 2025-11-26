@@ -1,0 +1,68 @@
+# Node modules
+node_modules
+client/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts
+client/build
+.next
+dist
+
+# Development files
+.env.local
+.env.development
+.env.test
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+
+# Docker
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile*
+.dockerignore
+
+# Documentation
+README.md
+*.md
+
+# Test files
+test/
+tests/
+**/*.test.js
+**/*.spec.js
+
+# Coverage
+coverage/
+.nyc_output
+
+# Temporary
+tmp/
+temp/
+
+# Scripts (except production scripts)
+scripts/sync-remote.sh
+
+# Models and views (if not needed in production)
+models/
+views/

@@ -1,0 +1,107 @@
+from http.server import BaseHTTPRequestHandler
+import json
+import urllib.parse
+from datetime import datetime
+
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Parse the URL path
+        path = self.path
+        
+        if path == '/chatbot/' or path == '/chatbot' or path == '/' or path == '':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "message": "ATL Chatbot API is running",
+                "status": "healthy",
+                "version": "1.0.0",
+                "timestamp": datetime.now().isoformat()
+            }
+            self.wfile.write(json.dumps(response).encode())
+            
+        elif path == '/chatbot/health' or path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {"status": "healthy", "service": "ATL Chatbot API"}
+            self.wfile.write(json.dumps(response).encode())
+            
+        elif path.startswith('/chatbot/chat') or path.startswith('/chat'):
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "message": "Chat endpoint is working! Use POST method with JSON body: {\"message\": \"your message\"}",
+                "method": "GET",
+                "path": path,
+                "instructions": "Send POST request with JSON body to use the chat functionality"
+            }
+            self.wfile.write(json.dumps(response).encode())
+            
+        else:
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {"error": "Not found", "path": path, "debug": "Available endpoints: /, /health, /chat (POST)"}
+            self.wfile.write(json.dumps(response).encode())
+    
+    def do_POST(self):
+        # Debug: log the actual path received
+        if self.path.startswith('/chatbot/chat') or self.path.startswith('/chat') or self.path == '/chatbot/chat' or self.path == '/chat':
+            # Read the request body
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            
+            try:
+                # Parse JSON data
+                data = json.loads(post_data.decode('utf-8'))
+                message = data.get('message', '')
+                user_id = data.get('user_id', 'anonymous')
+                
+                # Simple response
+                response = {
+                    "response": f"Hello! You said: '{message}'. This is a basic chatbot response.",
+                    "user_id": user_id,
+                    "chat_id": data.get('chat_id', 'default_chat'),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(response).encode())
+                
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                
+                response = {"error": f"Processing failed: {str(e)}"}
+                self.wfile.write(json.dumps(response).encode())
+        else:
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {"error": "POST endpoint not found", "path": self.path, "debug": "Use /chat for POST requests"}
+            self.wfile.write(json.dumps(response).encode())
+    
+    def do_OPTIONS(self):
+        # Handle CORS preflight requests
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
