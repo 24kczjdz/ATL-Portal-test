@@ -115,16 +115,16 @@ function AppRoutes() {
                     </ProtectedRoute>
                 } />
                 <Route path="/database/booking" element={
-                   
+                    <ProtectedRoute>
                         <ManageBooking />
-                   
+                    </ProtectedRoute>
                 } />
                 
                 {/* Booking routes */}
                 <Route path="/booking/equipment" element={
-                   
+                    <ProtectedRoute>
                         <EquipmentBooking />
-         
+                    </ProtectedRoute>
                 } />
                 <Route path="/booking/venue" element={
                     <ProtectedRoute>
