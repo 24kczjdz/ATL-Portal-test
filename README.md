@@ -10,7 +10,7 @@ This project uses a multi-tier architecture:
 - **Backend**: Node.js server with Express.js and RESTful APIs
 - **Database**: MongoDB for data persistence
 - **ML API**: Python FastAPI deployed on Hugging Face Spaces
-- **Deployment**: Vercel for hosting and CI/CD
+- **Deployment**: Any Node.js hosting platform (e.g., Railway, DigitalOcean, Heroku)
 - **Email**: SMTP integration for notifications
 
 ## 🚀 Features
@@ -60,7 +60,7 @@ This project uses a multi-tier architecture:
 - **Real-time**: WebSocket connections for live features
 - **Authentication**: JWT with role-based access control
 - **Email**: SMTP integration for notifications
-- **Deployment**: Vercel with automatic CI/CD
+- **Deployment**: Standard Node.js deployment
 
 ## 📁 Project Structure
 
@@ -194,7 +194,7 @@ The chatbot API is deployed on Hugging Face Spaces:
 - Node.js 16+ 
 - MongoDB database
 - Hugging Face account (for ML API)
-- Vercel account (for deployment)
+- Server for deployment (e.g., VPS, Railway, etc.)
 - SMTP server access (for email features)
 
 ### Local Development
@@ -236,11 +236,21 @@ The chatbot API is deployed on Hugging Face Spaces:
 
 ### Production Deployment
 
-The application is automatically deployed on Vercel:
+The application can be deployed on any platform that supports Node.js.
 
-1. **Connect repository to Vercel**
-2. **Set environment variables** in Vercel dashboard
-3. **Deploy** - automatic on git push
+1. **Build the frontend**
+   ```bash
+   cd client
+   npm run build
+   ```
+
+2. **Configure the backend**
+   Ensure `NODE_ENV=production` and point to the build directory.
+
+3. **Start the server**
+   ```bash
+   npm start
+   ```
 
 ## 📊 API Endpoints
 
