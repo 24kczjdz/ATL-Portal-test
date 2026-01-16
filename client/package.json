@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "homepage": ".",
+  "proxy": "http://localhost:5001",
   "dependencies": {
     "@headlessui/react": "^1.7.18",
     "@testing-library/react": "^16.1.0",
-    "@yudiel/react-qr-scanner": "^2.4.1",
+    "@yudiel/react-qr-scanner": "^2.0.8",
     "axios": "^1.6.0",
     "chart.js": "^4.4.0",
     "cra-template": "1.2.0",
@@ -57,3 +58,4 @@
     "node": "22.x"
   }
 }
+

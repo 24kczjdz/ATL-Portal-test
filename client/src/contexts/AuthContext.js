@@ -42,8 +42,8 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     const login = async (email, password) => {
-        const success = await userTable.handleLogin(email, password);
-        if (success) {
+        const result = await userTable.handleLogin(email, password);
+        if (result.success) {
             const user = userTable.getCurrentUser();
             if (user) {
                 // Ensure all required fields are present with default values
@@ -67,7 +67,7 @@ export const AuthProvider = ({ children }) => {
                 setIsAuthenticated(true);
             }
         }
-        return success;
+        return result;
     };
 
     const logout = () => {

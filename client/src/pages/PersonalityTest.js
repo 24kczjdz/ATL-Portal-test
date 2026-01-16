@@ -185,15 +185,15 @@ function PersonalityTest() {
 
       if (response.ok) {
         alert("Your answers have been submitted successfully!");
-        navigate("/ViewReport");
+        navigate("/");
       } else {
         alert("Your answers have been submitted successfully!");
-        navigate("/ViewReport");
+        navigate("/");
       }
     } catch (error) {
       console.error("Network error:", error);
       alert("Your answers have been submitted successfully!");
-      navigate("/ViewReport");
+      navigate("/");
     }
   };
 

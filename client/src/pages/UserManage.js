@@ -9,7 +9,9 @@ import {
     FiPhone,
     FiCalendar,
     FiBarChart,
-    FiX
+    FiX,
+    FiCheck,
+    FiAlertCircle
 } from 'react-icons/fi';
 
 function UserManage() {
@@ -22,7 +24,9 @@ function UserManage() {
     const [activityLoading, setActivityLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('');
+    const [approvalFilter, setApprovalFilter] = useState(''); // 'pending', 'approved', ''
     const [sortBy, setSortBy] = useState('name');
+    const [approvingUser, setApprovingUser] = useState(null);
     const [activityView, setActivityView] = useState('summary'); // 'summary', 'timeline', 'analytics'
     const [dateRange, setDateRange] = useState('30'); // days
     const [activityFilter, setActivityFilter] = useState('all'); // 'all', 'equipment', 'venue', 'projects', etc.
@@ -53,7 +57,11 @@ function UserManage() {
             
             const matchesRole = roleFilter === '' || user.User_Role === roleFilter;
             
-            return matchesSearch && matchesRole;
+            const matchesApproval = approvalFilter === '' || 
+                (approvalFilter === 'pending' && user.approved === false) ||
+                (approvalFilter === 'approved' && user.approved !== false);
+            
+            return matchesSearch && matchesRole && matchesApproval;
         });
 
         // Sort users
@@ -71,7 +79,7 @@ function UserManage() {
         });
 
         setFilteredUsers(filtered);
-    }, [users, searchTerm, roleFilter, sortBy]);
+    }, [users, searchTerm, roleFilter, approvalFilter, sortBy]);
 
     const fetchUsers = async () => {
         try {
@@ -149,6 +157,43 @@ function UserManage() {
             setActivityLoading(false);
         }
     }, []);
+
+    const handleApproveUser = async (userId) => {
+        if (!window.confirm('Are you sure you want to approve this user account?')) {
+            return;
+        }
+
+        setApprovingUser(userId);
+
+        try {
+            const response = await fetch(`/api/users/${userId}/approve`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                alert(`Account approved successfully for ${data.user?.First_Name} ${data.user?.Last_Name}`);
+                // Refresh users list
+                fetchUsers();
+                // Update selected user if it's the one that was approved
+                if (selectedUser?.User_ID === userId) {
+                    setSelectedUser({ ...selectedUser, approved: true });
+                }
+            } else {
+                alert(data.message || 'Failed to approve account');
+            }
+        } catch (err) {
+            console.error('Error approving user:', err);
+            alert('An error occurred while approving the account');
+        } finally {
+            setApprovingUser(null);
+        }
+    };
 
     const exportUserActivity = async (userId, format) => {
         try {
@@ -294,13 +339,16 @@ function UserManage() {
                                 <Badge variant="secondary" size="lg">
                                     Filtered: {filteredUsers.length}
                                 </Badge>
+                                <Badge variant="warning" size="lg">
+                                    Pending: {users.filter(u => u.approved === false).length}
+                                </Badge>
                             </div>
                         </div>
                     </Card.Header>
 
                     {/* Search and Filters */}
                     <Card.Content className="p-6">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
                             {/* Search Input */}
                             <div className="md:col-span-2">
                                 <Input
@@ -332,6 +380,22 @@ function UserManage() {
                                 </select>
                             </div>
 
+                            {/* Approval Status Filter */}
+                            <div>
+                                <label className="block text-sm font-serif font-medium text-primary-700 dark:text-gray-300 mb-2">
+                                    Approval Status
+                                </label>
+                                <select
+                                    value={approvalFilter}
+                                    onChange={(e) => setApprovalFilter(e.target.value)}
+                                    className="w-full px-4 py-3 font-literary border border-primary-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-primary-900 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/20 dark:focus:ring-primary-400/20 focus:border-primary-500 dark:focus:border-primary-400 transition-all duration-300"
+                                >
+                                    <option value="">All Users</option>
+                                    <option value="pending">Pending Approval</option>
+                                    <option value="approved">Approved</option>
+                                </select>
+                            </div>
+
                             {/* Sort By */}
                             <div>
                                 <label className="block text-sm font-serif font-medium text-primary-700 dark:text-gray-300 mb-2">
@@ -351,11 +415,12 @@ function UserManage() {
 
                         {/* Clear Filters */}
                         <div className="flex justify-end">
-                            {(searchTerm || roleFilter) && (
+                            {(searchTerm || roleFilter || approvalFilter) && (
                                 <Button
                                     onClick={() => {
                                         setSearchTerm('');
                                         setRoleFilter('');
+                                        setApprovalFilter('');
                                     }}
                                     variant="ghost"
                                     size="sm"
@@ -394,12 +459,24 @@ function UserManage() {
                                                 }`}
                                             >
                                             <div className="flex items-center justify-between mb-2">
-                                                <h4 className="font-serif font-medium text-primary-900 dark:text-white text-sm">
-                                                            {user.First_Name} {user.Last_Name}
-                                                </h4>
-                                                <Badge variant={getRoleVariant(user.User_Role)} size="sm">
-                                                    {user.User_Role.replace('ATL_', '').replace('_', ' ')}
-                                                </Badge>
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-serif font-medium text-primary-900 dark:text-white text-sm">
+                                                                {user.First_Name} {user.Last_Name}
+                                                    </h4>
+                                                    {user.approved === false && (
+                                                        <FiAlertCircle className="w-4 h-4 text-amber-500" title="Pending Approval" />
+                                                    )}
+                                                </div>
+                                                <div className="flex flex-col gap-1 items-end">
+                                                    <Badge variant={getRoleVariant(user.User_Role)} size="sm">
+                                                        {user.User_Role.replace('ATL_', '').replace('_', ' ')}
+                                                    </Badge>
+                                                    {user.approved === false && (
+                                                        <Badge variant="warning" size="sm">
+                                                            Pending
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                             </div>
                                             <p className="text-xs font-literary text-primary-500 dark:text-gray-400 truncate">
                                                 {user.Email_Address}
@@ -458,24 +535,66 @@ function UserManage() {
                             <Card.Content className="p-8">
                                 {/* User Info Header */}
                                 <div className="mb-8">
-                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+                                        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
                                         <div className="flex items-center space-x-4 mb-4 md:mb-0">
                                             <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/20 rounded-xl flex items-center justify-center">
                                                 <FiUsers className="w-8 h-8 text-primary-600 dark:text-primary-400" />
                                             </div>
                                             <div>
-                                                <h3 className="text-2xl font-serif font-bold text-primary-900 dark:text-white">
-                                            {selectedUser.First_Name} {selectedUser.Last_Name}
-                                        </h3>
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="text-2xl font-serif font-bold text-primary-900 dark:text-white">
+                                                {selectedUser.First_Name} {selectedUser.Last_Name}
+                                            </h3>
+                                                    {selectedUser.approved === false && (
+                                                        <FiAlertCircle className="w-6 h-6 text-amber-500" title="Pending Approval" />
+                                                    )}
+                                                </div>
                                                 <p className="font-literary text-primary-600 dark:text-gray-300">
                                                     {selectedUser.Title || 'User'} | {selectedUser.User_ID}
                                                 </p>
                                             </div>
                                         </div>
-                                        <Badge variant={getRoleVariant(selectedUser.User_Role)} size="lg">
-                                            {selectedUser.User_Role.replace('_', ' ')}
-                                        </Badge>
+                                        <div className="flex flex-col gap-2 items-end">
+                                            <Badge variant={getRoleVariant(selectedUser.User_Role)} size="lg">
+                                                {selectedUser.User_Role.replace('_', ' ')}
+                                            </Badge>
+                                            {selectedUser.approved === false ? (
+                                                <Badge variant="warning" size="lg">
+                                                    Pending Approval
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="success" size="lg">
+                                                    Approved
+                                                </Badge>
+                                            )}
+                                        </div>
                                     </div>
+                                    
+                                    {/* Approval Action */}
+                                    {selectedUser.approved === false && (
+                                        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <h4 className="font-serif font-medium text-amber-800 dark:text-amber-300 mb-1">
+                                                        Account Pending Approval
+                                                    </h4>
+                                                    <p className="text-sm font-literary text-amber-700 dark:text-amber-400">
+                                                        This user's account is waiting for admin approval. Review their information and approve to grant access.
+                                                    </p>
+                                                </div>
+                                                <Button
+                                                    onClick={() => handleApproveUser(selectedUser.User_ID)}
+                                                    disabled={approvingUser === selectedUser.User_ID}
+                                                    loading={approvingUser === selectedUser.User_ID}
+                                                    variant="success"
+                                                    icon={FiCheck}
+                                                    className="ml-4"
+                                                >
+                                                    Approve User
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
                                     
                                     {/* User Details Grid */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

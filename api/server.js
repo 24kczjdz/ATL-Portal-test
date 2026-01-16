@@ -31,8 +31,6 @@ import { connectDB } from '../config/db.js';
 const app = express();
 dotenv.config();
 
-
-
 // MongoDB connection management for serverless environments
 let isConnecting = false;
 let connectionPromise = null;
@@ -107,12 +105,14 @@ const corsOptions = {
       process.env.CORS_ORIGINS.split(',') : 
       [
         'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:5001',
         'https://atl-dashboard-one.vercel.app',
         'https://atl-dashboard-li48odu0l-candyyetszyus-projects.vercel.app',
         'https://*.vercel.app'
       ];
     
-    if (!origin || allowedOrigins.includes(origin) || origin?.includes('vercel.app')) {
+    if (!origin || allowedOrigins.includes(origin) || origin?.includes('vercel.app') || origin?.includes('localhost')) {
       callback(null, true);
     } else {
       console.log('CORS blocked origin:', origin);
@@ -204,7 +204,7 @@ export default app;
 
 // Local development server (only runs in development)
 if (process.env.NODE_ENV === 'development') {
-    const PORT = process.env.PORT || 5000;
+    const PORT = process.env.PORT || 3001;
     const server = app.listen(PORT, () => {
         console.log(`🚀 Development server running on port ${PORT}`);
         console.log(`📊 Health check: http://localhost:${PORT}/health`);
@@ -222,3 +222,4 @@ if (process.env.NODE_ENV === 'development') {
 
 // Vercel serverless function handler
 export const handler = app;
+

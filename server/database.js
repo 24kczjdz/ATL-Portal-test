@@ -17,6 +17,7 @@ const schema = {
         ATL_Member: Boolean, // Whether user is an ATL member
         Member_ID: String, // ATL Member ID (required if ATL_Member is true)
         UID: String, // HKU UID (required for HKU Staff and Students)
+        approved: { type: Boolean, default: false }, // Whether admin has approved the account
         direct_marketing: Boolean,
         email_list: Boolean,
         card_id: String,

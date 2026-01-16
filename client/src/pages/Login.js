@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Button, Input, Alert } from '../components/ui';
-import { FiMail, FiLock, FiLogIn } from 'react-icons/fi';
+import { FiMail, FiLock, FiLogIn, FiMapPin } from 'react-icons/fi';
 
 function Login() {
     const [email, setEmail] = useState('');
@@ -18,11 +18,16 @@ function Login() {
         setLoading(true);
 
         try {
-            const success = await login(email, password);
-            if (success) {
+            const result = await login(email, password);
+            if (result.success) {
                 navigate('/');
             } else {
-                setError('Invalid email or password');
+                // Show specific error message based on account status
+                if (result.accountStatus === 'pending_approval') {
+                    setError('Account not yet approved, please contact our admin in the lab.');
+                } else {
+                    setError(result.message || 'Invalid email or password');
+                }
             }
         } catch (err) {
             setError('An error occurred. Please try again.');
@@ -48,6 +53,27 @@ function Login() {
                         <p className="font-literary text-primary-600 dark:text-gray-300">
                             Sign in to your ATL account
                         </p>
+                    </div>
+
+                    {/* New User Information - Moved to top */}
+                    <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <div className="flex items-start gap-3">
+                            <FiMapPin className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <p className="font-serif font-medium text-amber-800 dark:text-amber-300 mb-1">
+                                    New User?
+                                </p>
+                                <p className="font-literary text-amber-700 dark:text-amber-400 text-sm leading-relaxed mb-3">
+                                    Please submit your registration information and bring your student ID card to <strong>Run Run Shaw Tower 4.40-4.41 Arts Tech Lab</strong> for account approval.
+                                </p>
+                                <Link
+                                    to="/register"
+                                    className="inline-flex items-center px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-serif text-sm rounded-lg transition-colors"
+                                >
+                                    Register New Account
+                                </Link>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Error Alert */}
@@ -114,19 +140,6 @@ function Login() {
                             {loading ? 'Signing in...' : 'Sign In'}
                         </Button>
                     </form>
-
-                    {/* Register Link */}
-                    <div className="mt-8 text-center">
-                        <p className="font-literary text-primary-600 dark:text-gray-300">
-                            Don't have an account?{' '}
-                            <Link
-                                to="/register"
-                                className="font-serif text-primary-900 dark:text-white hover:text-primary-700 dark:hover:text-gray-300 transition-colors"
-                            >
-                                Sign up here
-                            </Link>
-                        </p>
-                    </div>
                 </Card.Content>
             </Card>
         </div>

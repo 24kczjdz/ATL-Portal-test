@@ -15,8 +15,29 @@ router.get('/equipment', authMiddleware, async (req, res) => {
     };
     
     const equipment = await Equipment.find(query);
-    console.log(`🔍 Found ${equipment.length} equipment items for all users`);
-    res.json(equipment);
+    
+    // Check for active bookings and mark equipment as unavailable if needed
+    const equipmentWithAvailability = await Promise.all(equipment.map(async (item) => {
+      const activeBookings = await EquipmentBooking.countDocuments({
+        equipment_id: item._id,
+        status: { $in: ['pending', 'confirmed'] }
+      });
+      
+      const equipmentObj = item.toObject();
+      // Mark as unavailable if there are active bookings (unless it's already marked as maintenance/out_of_order)
+      if (activeBookings > 0 && equipmentObj.eqm_status === 'available') {
+        equipmentObj.availability_status = 'unavailable';
+        equipmentObj.active_bookings_count = activeBookings;
+      } else {
+        equipmentObj.availability_status = equipmentObj.eqm_status;
+        equipmentObj.active_bookings_count = activeBookings;
+      }
+      
+      return equipmentObj;
+    }));
+    
+    console.log(`🔍 Found ${equipmentWithAvailability.length} equipment items for all users`);
+    res.json(equipmentWithAvailability);
   } catch (error) {
     console.error('Error fetching equipment:', error);
     res.status(500).json({ message: 'Server error' });
@@ -194,6 +215,7 @@ router.patch('/equipment-bookings/:id/status', adminMiddleware, async (req, res)
       previous_status: previousStatus,
       new_status: status,
       notes: notes || '',
+      status_changed_at: new Date(),
       booking_details: {
         eqm_booking_date: booking.eqm_booking_date,
         eqm_booking_time: booking.eqm_booking_time,
@@ -298,18 +320,21 @@ router.get('/booking-logs/:bookingId', adminMiddleware, async (req, res) => {
   }
 });
 
-// Get all booking logs (Admin only)
+// Get all booking logs (Admin only) - includes both equipment and venue
 router.get('/booking-logs', adminMiddleware, async (req, res) => {
   try {
-    const { equipment_id, action, limit = 100 } = req.query;
+    const { equipment_id, venue_id, booking_type, action, limit = 100 } = req.query;
     
     const query = {};
     if (equipment_id) query.equipment_id = equipment_id;
+    if (venue_id) query.venue_id = venue_id;
+    if (booking_type) query.booking_type = booking_type;
     if (action) query.action = action;
     
     const logs = await BookingLog.find(query)
       .populate('equipment_id', 'eqm_name eqm_cat eqm_type location')
-      .sort({ createdAt: -1 })
+      .populate('venue_id', 'venue_unit venue_type venue_capacity')
+      .sort({ status_changed_at: -1, createdAt: -1 })
       .limit(parseInt(limit));
     
     res.json(logs);
@@ -351,6 +376,7 @@ router.post('/equipment-return/:bookingId', adminMiddleware, async (req, res) =>
       previous_status: previousStatus,
       new_status: 'completed',
       notes: notes || 'Equipment returned via QR scan',
+      status_changed_at: new Date(),
       booking_details: {
         eqm_booking_date: booking.eqm_booking_date,
         eqm_booking_time: booking.eqm_booking_time,
@@ -396,6 +422,63 @@ router.get('/equipment/:id/active-bookings', adminMiddleware, async (req, res) =
     res.json(bookings);
   } catch (error) {
     console.error('Error fetching active bookings:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Manual equipment return (Admin only) - return confirmed booking
+router.post('/equipment-return/manual', adminMiddleware, async (req, res) => {
+  try {
+    const { booking_id, notes } = req.body;
+    const booking = await EquipmentBooking.findById(booking_id).populate('equipment_id');
+    
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+    
+    if (booking.status !== 'confirmed') {
+      return res.status(400).json({ message: 'Only confirmed bookings can be returned' });
+    }
+    
+    const previousStatus = booking.status;
+    const equipment = booking.equipment_id;
+    
+    // Create a booking log entry for return
+    const bookingLog = new BookingLog({
+      booking_id: booking._id,
+      booking_type: 'equipment',
+      equipment_id: equipment?._id,
+      user_id: booking.user_id,
+      admin_id: req.user.User_ID,
+      action: 'returned',
+      previous_status: previousStatus,
+      new_status: 'completed',
+      notes: notes || 'Equipment returned manually',
+      status_changed_at: new Date(),
+      booking_details: {
+        eqm_booking_date: booking.eqm_booking_date,
+        eqm_booking_time: booking.eqm_booking_time,
+        eqm_booking_duration: booking.eqm_booking_duration,
+        equipment_name: equipment?.eqm_name,
+        equipment_category: equipment?.eqm_cat,
+        equipment_type: equipment?.eqm_type,
+        location: equipment?.location
+      }
+    });
+    
+    await bookingLog.save();
+    
+    // Update the booking status to completed
+    booking.status = 'completed';
+    await booking.save();
+    
+    res.json({ 
+      message: 'Equipment return confirmed successfully',
+      log_id: bookingLog._id,
+      booking: booking
+    });
+  } catch (error) {
+    console.error('Error processing manual equipment return:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

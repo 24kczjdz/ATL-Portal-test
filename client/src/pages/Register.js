@@ -238,15 +238,20 @@ function Register() {
                     setError(data.message || 'Failed to create admin account');
                 }
             } else {
-                // Regular registration
+                // Regular registration - create unapproved account
                 const { ConfirmPassword, adminToken, countryCode, ...userData } = formData;
                 // Combine country code with phone number
                 userData.Tel = `${formData.countryCode}${formData.Tel}`;
                 // Use Username as User_ID
                 userData.User_ID = formData.Username;
+                // Set approved to false for new registrations
+                userData.approved = false;
+                
                 const success = await userTable.handleWrite(userData);
                 
                 if (!success) {
+                    // Show success message
+                    alert('Registration submitted successfully! Please check your email for further instructions. You will need to visit the Arts Tech Lab at Run Run Shaw Tower 4.40-4.41 with your student ID card to complete the registration process.');
                     navigate('/login');
                 } else {
                     setError('Failed to create account. Please try again.');

@@ -8,8 +8,26 @@ function VenueBooking() {
     const [venues, setVenues] = useState([]);
     const [bookings, setBookings] = useState([]);
     const [selectedVenue, setSelectedVenue] = useState('');
-    const [bookingDate, setBookingDate] = useState('');
-    const [bookingTime, setBookingTime] = useState('');
+    
+    // Set default date to today in YYYY-MM-DD format
+    const getTodayDate = () => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    
+    // Set default time to current time in HH:MM format
+    const getCurrentTime = () => {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+    };
+    
+    const [bookingDate, setBookingDate] = useState(getTodayDate());
+    const [bookingTime, setBookingTime] = useState(getCurrentTime());
     const [bookingDuration, setBookingDuration] = useState(1);
     const [bookingDesc, setBookingDesc] = useState('');
     const [loading, setLoading] = useState(true);

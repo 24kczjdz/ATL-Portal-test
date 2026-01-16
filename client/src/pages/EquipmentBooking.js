@@ -1,32 +1,75 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Input, Badge, PageTemplate } from '../components/ui';
 import AvailabilityCalendar from '../components/AvailabilityCalendar';
-import { Scanner } from '@yudiel/react-qr-scanner';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 import { FiCalendar, FiClock, FiTool, FiX, FiCheck, FiAlertCircle, FiCamera, FiCheckCircle } from 'react-icons/fi';
 
 const QrScannerComponent = ({ onScan, onError, active }) => {
-    if (!active) return null;
-    
-    // The delay prop (300ms) helps prevent rapid, duplicate scans.
-    const previewStyle = { width: '100%' };
+    const scannerRef = useRef(null);
+    const containerRef = useRef(null);
 
-    /* REPLACE THIS BLOCK with your actual library component */
-    
-    // Example using @yudiel/react-qr-scanner:
-    
-    
+    useEffect(() => {
+        // Clear any existing scanner first
+        if (scannerRef.current) {
+            scannerRef.current.clear().catch(() => {});
+            scannerRef.current = null;
+        }
+
+        if (!active) {
+            return;
+        }
+
+        // Small delay to ensure DOM is ready and previous scanner is fully cleaned up
+        const timeoutId = setTimeout(() => {
+            // Clear the container contents to remove any leftover UI
+            if (containerRef.current) {
+                containerRef.current.innerHTML = '';
+            }
+
+            const config = {
+                fps: 10,
+                qrbox: { width: 250, height: 250 },
+            };
+
+            const scanner = new Html5QrcodeScanner('equipment-qr-reader', config, false);
+            scannerRef.current = scanner;
+
+            scanner.render(
+                (decodedText /*, decodedResult */) => {
+                    if (onScan) onScan(decodedText);
+                },
+                (errorMessage) => {
+                    // html5-qrcode is very noisy; only forward serious errors
+                    if (onError && typeof errorMessage === 'string' && !errorMessage.includes('QR code parse error')) {
+                        onError(new Error(errorMessage));
+                    }
+                }
+            );
+        }, 100);
+
+        return () => {
+            clearTimeout(timeoutId);
+            if (scannerRef.current) {
+                scannerRef.current.clear().catch(() => {});
+                scannerRef.current = null;
+            }
+            // Also clear the container on unmount
+            if (containerRef.current) {
+                containerRef.current.innerHTML = '';
+            }
+        };
+    }, [active, onScan, onError]);
+
+    if (!active) return null;
+
     return (
-        <div className="rounded-lg overflow-hidden border border-primary-300 dark:border-gray-600">
-            <Scanner
-                onDecode={(result) => onScan(result)}
-                onError={onError}
-                constraints={{ video: { facingMode: 'environment' } }}
-                containerStyle={previewStyle}
-            />
-        </div>
+        <div
+            ref={containerRef}
+            id="equipment-qr-reader"
+            className="rounded-lg overflow-hidden border border-primary-300 dark:border-gray-600"
+        />
     );
-    
 };
 
 
@@ -35,8 +78,26 @@ function EquipmentBooking() {
     const [equipment, setEquipment] = useState([]);
     const [bookings, setBookings] = useState([]);
     const [selectedEquipment, setSelectedEquipment] = useState('');
-    const [bookingDate, setBookingDate] = useState('');
-    const [bookingTime, setBookingTime] = useState('');
+    
+    // Set default date to today in YYYY-MM-DD format
+    const getTodayDate = () => {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+    
+    // Set default time to current time in HH:MM format
+    const getCurrentTime = () => {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+    };
+    
+    const [bookingDate, setBookingDate] = useState(getTodayDate());
+    const [bookingTime, setBookingTime] = useState(getCurrentTime());
     const [bookingDuration, setBookingDuration] = useState(1);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -54,14 +115,29 @@ function EquipmentBooking() {
     const fetchEquipment = async () => {
         try {
             setLoading(true);
+            const token = localStorage.getItem('token');
+            console.log('Fetching equipment with token:', token ? 'Token exists' : 'No token');
+            
             const response = await fetch('/api/equipment', {
                 headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    'Authorization': `Bearer ${token}`
                 }
             });
+            
+            console.log('Equipment API response status:', response.status);
+            
             if (response.ok) {
                 const data = await response.json();
-                setEquipment(data);
+                console.log('Equipment fetched:', data.length, 'items');
+                // Filter out unavailable equipment for booking
+                const availableEquipment = data.filter(item => {
+                    const status = item.availability_status || item.eqm_status;
+                    return status === 'available';
+                });
+                setEquipment(availableEquipment);
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('Equipment API error:', response.status, errorData);
             }
         } catch (error) {
             console.error('Error fetching equipment:', error);
@@ -92,19 +168,37 @@ function EquipmentBooking() {
     };
 
     // NEW FUNCTION: Handles the result from the QR code scanner
-    const handleScan = (result) => {
-        // Stop scanning immediately after the first successful result
-        if (result) {
+    const handleScan = async (result) => {
+        try {
+            if (!result) return;
+
+            // Normalise result into a string, because some browsers/libs
+            // may pass an object or array instead of a plain string
+            let rawText = '';
+
+            if (typeof result === 'string') {
+                rawText = result;
+            } else if (Array.isArray(result)) {
+                // Try common shapes from barcode APIs
+                const first = result[0] || {};
+                rawText = first.rawValue || first.text || JSON.stringify(first);
+            } else if (typeof result === 'object') {
+                rawText = result.text || result.rawValue || JSON.stringify(result);
+            } else {
+                console.warn('QR scan result in unexpected format:', result);
+                return;
+            }
+
+            const trimmedResult = rawText.trim();
+
             let equipmentId = null;
-            
+
             // Try to extract the equipment ID from the QR code
             // Support multiple formats:
-            // 1. Plain MongoDB ObjectId string (24 hex characters) - e.g., "507f1f77bcf86cd799439011"
-            // 2. JSON with _id field - e.g., {"_id": "507f1f77bcf86cd799439011"}
-            // 3. MongoDB Extended JSON - e.g., {"_id": {"$oid": "507f1f77bcf86cd799439011"}}
-            
-            const trimmedResult = result.trim();
-            
+            // 1. Plain MongoDB ObjectId string (24 hex characters)
+            // 2. JSON with _id field
+            // 3. MongoDB Extended JSON with $oid
+
             // Check if it's a plain ObjectId string
             if (isValidObjectId(trimmedResult)) {
                 equipmentId = trimmedResult;
@@ -112,7 +206,6 @@ function EquipmentBooking() {
                 // Try parsing as JSON
                 try {
                     const data = JSON.parse(trimmedResult);
-                    // Handle MongoDB Extended JSON format
                     equipmentId = data._id?.$oid || data._id || data.id || data.equipmentId;
                 } catch (error) {
                     // Not valid JSON - check if it might contain an ObjectId somewhere
@@ -122,7 +215,7 @@ function EquipmentBooking() {
                     }
                 }
             }
-            
+
             if (!equipmentId || !isValidObjectId(equipmentId)) {
                 setScanSuccess(false);
                 setScanMessage('Invalid QR code format. Expected a valid equipment ID.');
@@ -131,10 +224,32 @@ function EquipmentBooking() {
             }
 
             // Find the equipment in the local state
-            const foundEquipment = equipment.find(item => item._id === equipmentId);
+            let foundEquipment = equipment.find(item => String(item._id) === String(equipmentId));
+
+            // Fallback: ask backend directly in case local list is stale or filtered
+            if (!foundEquipment) {
+                try {
+                    const response = await fetch(`/api/equipment/${equipmentId}`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    if (response.ok) {
+                        const eq = await response.json();
+                        foundEquipment = eq;
+                        // Optionally merge into local equipment list for display
+                        setEquipment(prev => {
+                            const exists = prev.some(e => String(e._id) === String(eq._id));
+                            return exists ? prev : [...prev, eq];
+                        });
+                    }
+                } catch (fetchErr) {
+                    console.error('Error fetching equipment by ID after scan:', fetchErr);
+                }
+            }
 
             if (foundEquipment) {
-                setSelectedEquipment(equipmentId);
+                setSelectedEquipment(String(foundEquipment._id));
                 setShowScanner(false); // Close the scanner after a successful scan
                 setScanSuccess(true);
                 setScanMessage(`Equipment Selected: ${foundEquipment.eqm_name}`);
@@ -144,11 +259,16 @@ function EquipmentBooking() {
                     setScanSuccess(false);
                 }, 5000);
             } else {
-                // Equipment not found locally - it might not be available or doesn't exist
+                // Equipment not found locally or on backend
                 setScanSuccess(false);
-                setScanMessage('Equipment not found. It may not be available or does not exist.');
-                setTimeout(() => setScanMessage(''), 3000);
+                setScanMessage(`Equipment not found for ID: ${equipmentId}. It may not be available or does not exist.`);
+                setTimeout(() => setScanMessage(''), 4000);
             }
+        } catch (err) {
+            console.error('Error handling QR scan result:', err, 'raw result:', result);
+            setScanSuccess(false);
+            setScanMessage('Unexpected error while reading QR code.');
+            setTimeout(() => setScanMessage(''), 3000);
         }
     };
     

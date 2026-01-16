@@ -303,6 +303,16 @@ router.post('/database', async (req, res) => {
             const newUser = new models.USER(row);
             try {
                 await newUser.save();
+                
+                // Send registration confirmation email
+                try {
+                    await emailService.sendRegistrationConfirmationEmail(row);
+                    console.log('Registration confirmation email sent to:', row.Email_Address);
+                } catch (emailError) {
+                    console.error('Failed to send registration confirmation email:', emailError);
+                    // Don't fail the registration if email fails
+                }
+                
                 return res.status(200).json({ 
                     message: 'User created successfully.', 
                     [ID]: row[ID] 
@@ -381,6 +391,15 @@ router.post('/auth/login', async (req, res) => {
         
         if (!isValidPassword) {
             return res.status(401).json({ message: 'Invalid email or password' });
+        }
+        
+        // Check if user is approved (except for admins who are auto-approved)
+        if (user.User_Role !== 'ATL_ADMIN' && user.approved === false) {
+            console.log('❌ User account not yet approved:', email);
+            return res.status(403).json({ 
+                message: 'Account not yet approved, please contact our admin in the lab.',
+                accountStatus: 'pending_approval'
+            });
         }
         
         // Check if JWT_SECRET is available
@@ -1094,7 +1113,7 @@ router.post('/auth/register-admin', async (req, res) => {
             return res.status(400).json({ message: validationError });
         }
 
-        // Create new admin user
+        // Create new admin user (admins are auto-approved)
         const newUser = new models.USER({
             User_ID,
             Email_Address,
@@ -1109,6 +1128,7 @@ router.post('/auth/register-admin', async (req, res) => {
             ATL_Member: ATL_Member || false,
             Member_ID: Member_ID || '',
             UID: UID || '',
+            approved: true, // Admins are automatically approved
             direct_marketing: direct_marketing || false,
             email_list: email_list || false,
             createdAt: new Date(),
@@ -1525,6 +1545,91 @@ router.get('/auth/validate-reset-token/:token', async (req, res) => {
         res.status(500).json({ 
             valid: false,
             message: 'Error validating token' 
+        });
+    }
+});
+
+// Account Approval Routes (Admin Only)
+// Get pending user approvals
+router.get('/users/pending-approvals', verifyAdmin, async (req, res) => {
+    try {
+        await ensureConnected();
+        
+        // Find all users with approved = false
+        const pendingUsers = await models.USER
+            .find({ approved: false })
+            .select('-Password')
+            .sort({ createdAt: -1 })
+            .lean();
+        
+        console.log(`✅ Found ${pendingUsers.length} pending user approvals`);
+        res.json({ 
+            success: true,
+            users: pendingUsers,
+            count: pendingUsers.length
+        });
+    } catch (error) {
+        console.error('❌ Error fetching pending users:', error);
+        res.status(500).json({ 
+            success: false,
+            message: 'Server error', 
+            error: error.message 
+        });
+    }
+});
+
+// Approve user account
+router.post('/users/:userId/approve', verifyAdmin, async (req, res) => {
+    try {
+        await ensureConnected();
+        
+        const { userId } = req.params;
+        console.log(`🔍 Attempting to approve user: ${userId}`);
+        
+        // Find and update the user
+        const user = await models.USER.findOne({ User_ID: userId });
+        
+        if (!user) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'User not found' 
+            });
+        }
+        
+        // Update approved status
+        user.approved = true;
+        await user.save();
+        
+        console.log(`✅ User approved successfully: ${userId}`);
+        
+        // Send approval confirmation email
+        try {
+            const emailResult = await emailService.sendAccountApprovalEmail(user);
+            if (emailResult.success) {
+                console.log(`📧 Approval email sent to: ${user.Email_Address}`);
+            }
+        } catch (emailError) {
+            console.error('Failed to send approval email:', emailError);
+            // Don't fail the approval if email fails
+        }
+        
+        res.json({ 
+            success: true,
+            message: 'User account approved successfully',
+            user: {
+                User_ID: user.User_ID,
+                First_Name: user.First_Name,
+                Last_Name: user.Last_Name,
+                Email_Address: user.Email_Address,
+                approved: user.approved
+            }
+        });
+    } catch (error) {
+        console.error('❌ Error approving user:', error);
+        res.status(500).json({ 
+            success: false,
+            message: 'Server error', 
+            error: error.message 
         });
     }
 });

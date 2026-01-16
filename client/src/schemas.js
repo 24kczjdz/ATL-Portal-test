@@ -12,6 +12,7 @@ export const userSchema = {
     ATL_Member: false,
     Member_ID: "",
     UID: "",
+    approved: false, // Whether admin has approved the account
     direct_marketing: false,
     email_list: false,
     card_id: "",

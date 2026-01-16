@@ -190,14 +190,19 @@ class DBTable {
                 console.log('Login successful');
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('user', JSON.stringify(data.user));
-                return true;
+                return { success: true };
             } else {
                 console.error('Login failed:', data.message);
-                return false;
+                // Return error message for specific handling
+                return { 
+                    success: false, 
+                    message: data.message || 'Login failed',
+                    accountStatus: data.accountStatus // Will be 'pending_approval' for unapproved accounts
+                };
             }
         } catch (error) {
             console.error('Login error:', error);
-            return false;
+            return { success: false, message: 'Network error. Please try again.' };
         }
     };
 

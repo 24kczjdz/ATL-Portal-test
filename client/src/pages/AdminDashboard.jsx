@@ -472,6 +472,7 @@ const AdminDashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[
                 { name: 'User Management', icon: FiUsers, description: 'Manage user accounts and permissions', link: '/database/user' },
+                { name: 'Account Approvals', icon: FiUsers, description: 'Review and approve pending user registrations', link: '/admin/account-approvals' },
                 { name: 'Booking Management', icon: FiCalendar, description: 'Oversee equipment and venue bookings', link: '/database/booking' },
                 { name: 'Project Management', icon: FiFolderPlus, description: 'Manage collaborative projects', link: '/database/projects' },
                 { name: 'Activity Management', icon: FiActivity, description: 'Control live activities and events', link: '/database/activity' },

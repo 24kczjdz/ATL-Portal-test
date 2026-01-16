@@ -17,6 +17,7 @@ import Help from './pages/Help';
 import Contact from './pages/Contact';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ManageAccountApprovals from './pages/ManageAccountApprovals';
 import Profile from './pages/Profile';
 import ForgotPassword from './components/auth/ForgotPassword';
 import ResetPassword from './components/auth/ResetPassword';
@@ -151,6 +152,16 @@ function AppRoutes() {
                 <Route path="/database/student-interest-group" element={
                     <ProtectedRoute>
                         <ManageStudentInterestGroup />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/account-approvals" element={
+                    <ProtectedRoute>
+                        <ManageAccountApprovals />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/register-user" element={
+                    <ProtectedRoute>
+                        <Register />
                     </ProtectedRoute>
                 } />
                 

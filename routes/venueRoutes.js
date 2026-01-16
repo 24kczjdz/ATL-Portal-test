@@ -1,6 +1,7 @@
 import express from 'express';
 import Venue from '../api/models/Venue.js';
 import VenueBooking from '../api/models/VenueBooking.js';
+import BookingLog from '../api/models/BookingLog.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -176,20 +177,53 @@ router.get('/venue-bookings/all', adminMiddleware, async (req, res) => {
   }
 });
 
-// Update venue booking status (Admin only)
+// Update venue booking status (Admin only) - Creates a log entry
 router.patch('/venue-bookings/:id/status', adminMiddleware, async (req, res) => {
   try {
-    const { status } = req.body;
-    const booking = await VenueBooking.findById(req.params.id);
+    const { status, notes } = req.body;
+    const booking = await VenueBooking.findById(req.params.id).populate('venue_id');
     
     if (!booking) {
       return res.status(404).json({ message: 'Booking not found' });
     }
     
+    const previousStatus = booking.status;
+    const venue = booking.venue_id;
+    
+    // Create a booking log entry
+    const bookingLog = new BookingLog({
+      booking_id: booking._id,
+      booking_type: 'venue',
+      venue_id: venue?._id,
+      user_id: booking.user_id,
+      admin_id: req.user.User_ID,
+      action: status,
+      previous_status: previousStatus,
+      new_status: status,
+      notes: notes || '',
+      status_changed_at: new Date(),
+      booking_details: {
+        venue_booking_date: booking.booking_date,
+        venue_booking_time: booking.booking_time,
+        venue_booking_duration: booking.booking_duration,
+        venue_unit: venue?.venue_unit,
+        venue_type: venue?.venue_type,
+        venue_capacity: venue?.venue_capacity,
+        booking_desc: booking.booking_desc,
+        total_pay: booking.total_pay
+      }
+    });
+    
+    await bookingLog.save();
+    
+    // Update the booking status
     booking.status = status;
     await booking.save();
     
-    res.json({ message: 'Venue booking status updated successfully' });
+    res.json({ 
+      message: 'Venue booking status updated successfully',
+      log_id: bookingLog._id
+    });
   } catch (error) {
     console.error('Error updating venue booking status:', error);
     res.status(500).json({ message: 'Server error' });
@@ -380,6 +414,89 @@ router.get('/venues/:id/calculate-cost', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error calculating venue cost:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Mark venue as returned (Admin only)
+router.post('/venue-return/:bookingId', adminMiddleware, async (req, res) => {
+  try {
+    const { notes } = req.body;
+    const booking = await VenueBooking.findById(req.params.bookingId).populate('venue_id');
+    
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+    
+    if (booking.status === 'completed') {
+      return res.status(400).json({ message: 'Booking is already completed' });
+    }
+    
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ message: 'Cannot return a cancelled booking' });
+    }
+    
+    const previousStatus = booking.status;
+    const venue = booking.venue_id;
+    
+    // Create a booking log entry for return
+    const bookingLog = new BookingLog({
+      booking_id: booking._id,
+      booking_type: 'venue',
+      venue_id: venue?._id,
+      user_id: booking.user_id,
+      admin_id: req.user.User_ID,
+      action: 'returned',
+      previous_status: previousStatus,
+      new_status: 'completed',
+      notes: notes || 'Venue returned manually',
+      status_changed_at: new Date(),
+      booking_details: {
+        venue_booking_date: booking.booking_date,
+        venue_booking_time: booking.booking_time,
+        venue_booking_duration: booking.booking_duration,
+        venue_unit: venue?.venue_unit,
+        venue_type: venue?.venue_type,
+        venue_capacity: venue?.venue_capacity,
+        booking_desc: booking.booking_desc,
+        total_pay: booking.total_pay
+      }
+    });
+    
+    await bookingLog.save();
+    
+    // Update the booking status to completed
+    booking.status = 'completed';
+    await booking.save();
+    
+    res.json({ 
+      message: 'Venue return confirmed successfully',
+      log_id: bookingLog._id,
+      booking: booking
+    });
+  } catch (error) {
+    console.error('Error processing venue return:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get active venue bookings (for return management)
+router.get('/venues/:id/active-bookings', adminMiddleware, async (req, res) => {
+  try {
+    const bookings = await VenueBooking.find({
+      venue_id: req.params.id,
+      status: { $in: ['pending', 'confirmed'] }
+    }).populate({
+      path: 'user_id',
+      select: 'First_Name Last_Name Email_Address',
+      model: 'USER',
+      localField: 'user_id',
+      foreignField: 'User_ID'
+    }).sort({ booking_date: -1 });
+    
+    res.json(bookings);
+  } catch (error) {
+    console.error('Error fetching active venue bookings:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

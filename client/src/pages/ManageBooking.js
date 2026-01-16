@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Scanner } from '@yudiel/react-qr-scanner';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import { Card, Button, PageTemplate, Badge } from '../components/ui';
 import { 
     FiTool, 
@@ -17,21 +17,74 @@ import {
     FiPackage
 } from 'react-icons/fi';
 
-// QR Scanner Component with actual camera
+// QR Scanner Component with actual camera using html5-qrcode
 const QrScannerComponent = ({ onScan, onError, active }) => {
+    const scannerRef = useRef(null);
+    const containerRef = useRef(null);
+
+    useEffect(() => {
+        // Clear any existing scanner first
+        if (scannerRef.current) {
+            scannerRef.current.clear().catch(() => {});
+            scannerRef.current = null;
+        }
+
+        if (!active) {
+            // Clear container when inactive
+            if (containerRef.current) {
+                containerRef.current.innerHTML = '';
+            }
+            return;
+        }
+
+        // Small delay to ensure DOM is ready and previous scanner is fully cleaned up
+        const timeoutId = setTimeout(() => {
+            // Clear the container contents to remove any leftover UI
+            if (containerRef.current) {
+                containerRef.current.innerHTML = '';
+            }
+
+            const config = {
+                fps: 10,
+                qrbox: { width: 250, height: 250 },
+            };
+
+            const scanner = new Html5QrcodeScanner('return-qr-reader', config, false);
+            scannerRef.current = scanner;
+
+            scanner.render(
+                (decodedText /*, decodedResult */) => {
+                    if (onScan) onScan(decodedText);
+                },
+                (errorMessage) => {
+                    if (onError && typeof errorMessage === 'string' && !errorMessage.includes('QR code parse error')) {
+                        onError(new Error(errorMessage));
+                    }
+                }
+            );
+        }, 100);
+
+        return () => {
+            clearTimeout(timeoutId);
+            if (scannerRef.current) {
+                scannerRef.current.clear().catch(() => {});
+                scannerRef.current = null;
+            }
+            // Also clear the container on unmount
+            if (containerRef.current) {
+                containerRef.current.innerHTML = '';
+            }
+        };
+    }, [active, onScan, onError]);
+
     if (!active) return null;
 
-    const previewStyle = { width: '100%' };
-
     return (
-        <div className="rounded-lg overflow-hidden border border-primary-300 dark:border-gray-600">
-            <Scanner
-                onDecode={(result) => onScan(result)}
-                onError={onError}
-                constraints={{ video: { facingMode: 'environment' } }}
-                containerStyle={previewStyle}
-            />
-        </div>
+        <div
+            ref={containerRef}
+            id="return-qr-reader"
+            className="rounded-lg overflow-hidden border border-primary-300 dark:border-gray-600"
+        />
     );
 };
 
@@ -52,6 +105,12 @@ function ManageBooking() {
     const [returnLoading, setReturnLoading] = useState(false);
     const [scanMessage, setScanMessage] = useState('');
     const [scanSuccess, setScanSuccess] = useState(false);
+    
+    // Manual Return State
+    const [selectedEquipmentForReturn, setSelectedEquipmentForReturn] = useState('');
+    const [selectedVenueForReturn, setSelectedVenueForReturn] = useState('');
+    const [confirmedEquipmentBookings, setConfirmedEquipmentBookings] = useState([]);
+    const [confirmedVenueBookings, setConfirmedVenueBookings] = useState([]);
 
     // Fetch functions
     const fetchEquipmentBookings = async () => {
@@ -95,12 +154,42 @@ function ManageBooking() {
     };
 
     const fetchBookingLogs = async () => {
-        const response = await fetch('/api/booking-logs?limit=50', {
+        const response = await fetch('/api/booking-logs?limit=100', {
             headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
         });
         if (response.ok) {
             const data = await response.json();
             setBookingLogs(data);
+        }
+    };
+
+    const fetchConfirmedEquipmentBookings = async () => {
+        try {
+            const response = await fetch('/api/equipment-bookings/all', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const confirmed = data.filter(b => b.status === 'confirmed');
+                setConfirmedEquipmentBookings(confirmed);
+            }
+        } catch (error) {
+            console.error('Error fetching confirmed equipment bookings:', error);
+        }
+    };
+
+    const fetchConfirmedVenueBookings = async () => {
+        try {
+            const response = await fetch('/api/venue-bookings/all', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const confirmed = data.filter(b => b.status === 'confirmed');
+                setConfirmedVenueBookings(confirmed);
+            }
+        } catch (error) {
+            console.error('Error fetching confirmed venue bookings:', error);
         }
     };
 
@@ -113,7 +202,9 @@ function ManageBooking() {
                 fetchVenueBookings(),
                 fetchEquipment(),
                 fetchVenues(),
-                fetchBookingLogs()
+                fetchBookingLogs(),
+                fetchConfirmedEquipmentBookings(),
+                fetchConfirmedVenueBookings()
             ]);
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -136,10 +227,28 @@ function ManageBooking() {
 
     // Handle QR Scan for Equipment Return
     const handleReturnScan = async (result) => {
-        if (result) {
+        try {
+            if (!result) return;
+
+            // Normalise result into a string
+            let rawText = '';
+
+            if (typeof result === 'string') {
+                rawText = result;
+            } else if (Array.isArray(result)) {
+                const first = result[0] || {};
+                rawText = first.rawValue || first.text || JSON.stringify(first);
+            } else if (typeof result === 'object') {
+                rawText = result.text || result.rawValue || JSON.stringify(result);
+            } else {
+                console.warn('QR return scan result in unexpected format:', result);
+                    return;
+                }
+
+            const trimmedResult = rawText.trim();
+
             let equipmentId = null;
-            const trimmedResult = result.trim();
-            
+
             // Check if it's a plain ObjectId string
             if (isValidObjectId(trimmedResult)) {
                 equipmentId = trimmedResult;
@@ -196,6 +305,11 @@ function ManageBooking() {
             }
             
             setTimeout(() => setScanMessage(''), 5000);
+        } catch (err) {
+            console.error('Unexpected error in handleReturnScan:', err, 'raw result:', result);
+            setScanSuccess(false);
+            setScanMessage('Unexpected error while reading QR code.');
+            setTimeout(() => setScanMessage(''), 3000);
         }
     };
 
@@ -238,6 +352,79 @@ function ManageBooking() {
         } finally {
             setReturnLoading(false);
             setTimeout(() => setScanMessage(''), 5000);
+        }
+    };
+
+    // Handle Manual Equipment Return
+    const handleManualEquipmentReturn = async () => {
+        if (!selectedEquipmentForReturn) {
+            alert('Please select an equipment booking to return');
+            return;
+        }
+
+        setReturnLoading(true);
+        try {
+            const response = await fetch('/api/equipment-return/manual', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ 
+                    booking_id: selectedEquipmentForReturn,
+                    notes: 'Equipment returned manually via admin panel'
+                })
+            });
+
+            if (response.ok) {
+                alert('Equipment return confirmed successfully!');
+                setSelectedEquipmentForReturn('');
+                await fetchAllData();
+            } else {
+                const error = await response.json();
+                alert(`Error: ${error.message || 'Failed to return equipment'}`);
+            }
+        } catch (error) {
+            console.error('Error processing manual return:', error);
+            alert('Error processing equipment return.');
+        } finally {
+            setReturnLoading(false);
+        }
+    };
+
+    // Handle Manual Venue Return
+    const handleManualVenueReturn = async () => {
+        if (!selectedVenueForReturn) {
+            alert('Please select a venue booking to return');
+            return;
+        }
+
+        setReturnLoading(true);
+        try {
+            const response = await fetch(`/api/venue-return/${selectedVenueForReturn}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ 
+                    notes: 'Venue returned manually via admin panel'
+                })
+            });
+
+            if (response.ok) {
+                alert('Venue return confirmed successfully!');
+                setSelectedVenueForReturn('');
+                await fetchAllData();
+            } else {
+                const error = await response.json();
+                alert(`Error: ${error.message || 'Failed to return venue'}`);
+            }
+        } catch (error) {
+            console.error('Error processing manual venue return:', error);
+            alert('Error processing venue return.');
+        } finally {
+            setReturnLoading(false);
         }
     };
 
@@ -293,11 +480,15 @@ function ManageBooking() {
     const getStatusVariant = (status) => {
         const variants = {
             'pending': 'warning',
-            'confirmed': 'success',
+            'confirmed': 'primary',
             'cancelled': 'error',
-            'completed': 'neutral'
+            'completed': 'success',
+            'finished': 'success',
+            'available': 'success',
+            'maintenance': 'warning',
+            'out_of_order': 'error'
         };
-        return variants[status] || 'neutral';
+        return variants[status?.toLowerCase()] || 'neutral';
     };
 
     // Group equipment by location
@@ -496,6 +687,48 @@ function ManageBooking() {
                             <p className="text-sm">Click the button above to scan equipment QR codes for returns</p>
                         </div>
                     )}
+
+                    {/* Manual Return Section */}
+                    <div className="mt-6 pt-6 border-t border-primary-200 dark:border-gray-700">
+                        <h4 className="font-serif font-semibold text-primary-900 dark:text-white mb-4 flex items-center">
+                            <FiPackage className="mr-2" />
+                            Manual Return
+                        </h4>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-serif font-medium text-primary-700 dark:text-gray-300 mb-2">
+                                    Select Confirmed Equipment Booking
+                                </label>
+                                <select
+                                    value={selectedEquipmentForReturn}
+                                    onChange={(e) => setSelectedEquipmentForReturn(e.target.value)}
+                                    className="w-full px-4 py-3 font-literary border border-primary-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-primary-900 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/20 dark:focus:ring-primary-400/20 focus:border-primary-500 dark:focus:border-primary-400 transition-all duration-300"
+                                >
+                                    <option value="">Select a confirmed booking...</option>
+                                    {confirmedEquipmentBookings.map((booking) => (
+                                        <option key={booking._id} value={booking._id}>
+                                            {booking.equipment?.eqm_name} - {formatDate(booking.eqm_booking_date)} at {booking.eqm_booking_time} ({booking.user?.First_Name} {booking.user?.Last_Name})
+                                        </option>
+                                    ))}
+                                </select>
+                                {confirmedEquipmentBookings.length === 0 && (
+                                    <p className="text-xs text-primary-500 dark:text-gray-400 mt-2">
+                                        No confirmed equipment bookings available for return
+                                    </p>
+                                )}
+                            </div>
+                            <Button
+                                onClick={handleManualEquipmentReturn}
+                                variant="primary"
+                                className="w-full"
+                                loading={returnLoading}
+                                disabled={!selectedEquipmentForReturn || returnLoading}
+                                icon={FiCheck}
+                            >
+                                Mark Equipment as Returned
+                            </Button>
+                        </div>
+                    </div>
                 </div>
             </Card.Content>
         </Card>
@@ -527,11 +760,25 @@ function ManageBooking() {
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {groupedEquipment[location].map((item) => {
-                                        // Count active bookings for this equipment
-                                        const activeBookingCount = equipmentBookings.filter(
+                                        // Find active bookings for this equipment
+                                        const activeBookings = equipmentBookings.filter(
                                             b => b.equipment?._id === item._id && 
                                                 (b.status === 'pending' || b.status === 'confirmed')
-                                        ).length;
+                                        );
+                                        const activeBookingCount = activeBookings.length;
+                                        
+                                        // Get the most recent active booking status
+                                        const mostRecentBooking = activeBookings.sort((a, b) => 
+                                            new Date(b.createdAt) - new Date(a.createdAt)
+                                        )[0];
+                                        
+                                        // Determine which status to show
+                                        const displayStatus = mostRecentBooking 
+                                            ? mostRecentBooking.status 
+                                            : item.eqm_status;
+                                        
+                                        // Use the consolidated getStatusVariant function
+                                        const displayVariant = getStatusVariant(displayStatus);
 
                                         return (
                                             <div 
@@ -542,8 +789,8 @@ function ManageBooking() {
                                                     <h4 className="font-serif font-medium text-primary-900 dark:text-white">
                                                         {item.eqm_name}
                                                     </h4>
-                                                    <Badge variant={getEquipmentStatusVariant(item.eqm_status)}>
-                                                        {item.eqm_status}
+                                                    <Badge variant={displayVariant}>
+                                                        {displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
                                                     </Badge>
                                                 </div>
                                                 <div className="space-y-1 text-sm text-primary-600 dark:text-gray-400">
@@ -557,7 +804,14 @@ function ManageBooking() {
                                                     {activeBookingCount > 0 && (
                                                         <p className="mt-2">
                                                             <Badge variant="warning">
-                                                                {activeBookingCount} active booking(s)
+                                                                {activeBookingCount} active booking(s) - Unavailable
+                                                            </Badge>
+                                                        </p>
+                                                    )}
+                                                    {(item.availability_status === 'unavailable' || item.eqm_status !== 'available') && activeBookingCount === 0 && (
+                                                        <p className="mt-2">
+                                                            <Badge variant={item.eqm_status === 'maintenance' ? 'warning' : 'error'}>
+                                                                {item.eqm_status}
                                                             </Badge>
                                                         </p>
                                                     )}
@@ -644,7 +898,7 @@ function ManageBooking() {
             <Card.Header>
                 <Card.Title className="text-xl font-serif flex items-center">
                     <FiClock className="mr-2" />
-                    Recent Activity Log
+                    Detailed Booking Activity Log
                 </Card.Title>
             </Card.Header>
             <Card.Content>
@@ -655,31 +909,86 @@ function ManageBooking() {
                     </div>
                 ) : (
                     <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {bookingLogs.map((log) => (
-                            <div 
-                                key={log._id} 
-                                className="p-3 bg-primary-50 dark:bg-gray-700/50 rounded-lg border-l-4 border-primary-500"
-                            >
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <p className="text-sm font-medium text-primary-900 dark:text-white">
-                                            {log.booking_details?.equipment_name || 'Equipment'}
-                                        </p>
-                                        <p className="text-xs text-primary-600 dark:text-gray-400">
-                                            {log.previous_status} → <strong>{log.new_status}</strong>
-                                        </p>
-                                        {log.notes && (
-                                            <p className="text-xs text-primary-500 dark:text-gray-500 mt-1">
-                                                {log.notes}
+                        {bookingLogs.map((log) => {
+                            const isEquipment = log.booking_type === 'equipment';
+                            const itemName = isEquipment 
+                                ? log.booking_details?.equipment_name || log.equipment_id?.eqm_name || 'Equipment'
+                                : log.booking_details?.venue_unit || log.venue_id?.venue_unit || 'Venue';
+                            const statusChangeTime = log.status_changed_at || log.createdAt;
+                            
+                            return (
+                                <div 
+                                    key={log._id} 
+                                    className="p-4 bg-primary-50 dark:bg-gray-700/50 rounded-lg border-l-4 border-primary-500"
+                                >
+                                    <div className="flex justify-between items-start gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                {isEquipment ? <FiTool className="text-primary-500" /> : <FiHome className="text-primary-500" />}
+                                                <p className="text-sm font-medium text-primary-900 dark:text-white">
+                                                    {itemName}
+                                                </p>
+                                                <Badge variant={log.booking_type === 'equipment' ? 'neutral' : 'success'} className="text-xs">
+                                                    {log.booking_type === 'equipment' ? 'Equipment' : 'Venue'}
+                                                </Badge>
+                                            </div>
+                                            
+                                            {/* Status Change Information */}
+                                            <div className="space-y-1 mb-2">
+                                                <p className="text-xs text-primary-600 dark:text-gray-400">
+                                                    Status Change: <span className="font-medium">{log.previous_status || 'N/A'}</span> → <strong className="font-semibold">{log.new_status}</strong>
+                                                </p>
+                                                <p className="text-xs text-primary-500 dark:text-gray-500">
+                                                    Action: <span className="font-medium capitalize">{log.action}</span>
+                                                    {log.admin_id && ` • Admin: ${log.admin_id}`}
+                                                </p>
+                                                {log.notes && (
+                                                    <p className="text-xs text-primary-500 dark:text-gray-500 mt-1 italic">
+                                                        Note: {log.notes}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            {/* Booking Details */}
+                                            <div className="text-xs text-primary-500 dark:text-gray-500 space-y-1 mt-2 pt-2 border-t border-primary-200 dark:border-gray-600">
+                                                {isEquipment ? (
+                                                    <>
+                                                        {log.booking_details?.eqm_booking_date && (
+                                                            <p>Booking Date: {formatDate(log.booking_details.eqm_booking_date)} at {log.booking_details.eqm_booking_time} ({log.booking_details.eqm_booking_duration}h)</p>
+                                                        )}
+                                                        {log.booking_details?.equipment_category && (
+                                                            <p>Category: {log.booking_details.equipment_category} - {log.booking_details.equipment_type}</p>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {log.booking_details?.venue_booking_date && (
+                                                            <p>Booking Date: {formatDate(log.booking_details.venue_booking_date)} at {log.booking_details.venue_booking_time} ({log.booking_details.venue_booking_duration}h)</p>
+                                                        )}
+                                                        {log.booking_details?.venue_type && (
+                                                            <p>Venue Type: {log.booking_details.venue_type} (Capacity: {log.booking_details.venue_capacity})</p>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs font-semibold text-primary-600 dark:text-gray-400 mb-1">
+                                                Status Changed
                                             </p>
-                                        )}
+                                            <span className="text-xs text-primary-400 dark:text-gray-500 whitespace-nowrap">
+                                                {formatDateTime(statusChangeTime)}
+                                            </span>
+                                            {log.createdAt && log.createdAt.getTime() !== statusChangeTime?.getTime() && (
+                                                <p className="text-xs text-primary-300 dark:text-gray-600 mt-1">
+                                                    Logged: {formatDateTime(log.createdAt)}
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
-                                    <span className="text-xs text-primary-400 dark:text-gray-500">
-                                        {formatDateTime(log.createdAt)}
-                                    </span>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </Card.Content>
@@ -688,59 +997,107 @@ function ManageBooking() {
 
     // Render Venue Bookings
     const renderVenueBookings = () => (
-        <Card>
-            <Card.Header>
-                <Card.Title className="text-xl font-serif flex items-center">
-                    <FiHome className="mr-2" />
-                    Venue Bookings
-                </Card.Title>
-            </Card.Header>
-            <Card.Content>
-                {venueBookings.length === 0 ? (
-                    <div className="text-center py-8">
-                        <FiAlertCircle className="w-12 h-12 text-primary-300 dark:text-gray-600 mx-auto mb-4" />
-                        <p className="font-literary text-primary-500 dark:text-gray-400">No venue bookings found</p>
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        {venueBookings.map((booking) => (
-                            <div 
-                                key={booking._id} 
-                                className="p-4 bg-primary-50 dark:bg-gray-700/50 rounded-lg border border-primary-200 dark:border-gray-600"
-                            >
-                                <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4">
-                                    <div className="flex-1 space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <FiHome className="text-primary-500" />
-                                            <h4 className="font-serif font-medium text-primary-900 dark:text-white">
-                                                {booking.venue?.venue_unit || 'Unknown Venue'}
-                                            </h4>
+        <div className="space-y-6">
+            <Card>
+                <Card.Header>
+                    <Card.Title className="text-xl font-serif flex items-center">
+                        <FiHome className="mr-2" />
+                        Venue Bookings
+                    </Card.Title>
+                </Card.Header>
+                <Card.Content>
+                    {venueBookings.length === 0 ? (
+                        <div className="text-center py-8">
+                            <FiAlertCircle className="w-12 h-12 text-primary-300 dark:text-gray-600 mx-auto mb-4" />
+                            <p className="font-literary text-primary-500 dark:text-gray-400">No venue bookings found</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {venueBookings.map((booking) => (
+                                <div 
+                                    key={booking._id} 
+                                    className="p-4 bg-primary-50 dark:bg-gray-700/50 rounded-lg border border-primary-200 dark:border-gray-600"
+                                >
+                                    <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4">
+                                        <div className="flex-1 space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <FiHome className="text-primary-500" />
+                                                <h4 className="font-serif font-medium text-primary-900 dark:text-white">
+                                                    {booking.venue?.venue_unit || 'Unknown Venue'}
+                                                </h4>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-primary-600 dark:text-gray-400">
+                                                <p className="flex items-center gap-1">
+                                                    <FiCalendar className="w-4 h-4" />
+                                                    {formatDate(booking.booking_date || booking.venue_booking_date)}
+                                                </p>
+                                                <p className="flex items-center gap-1">
+                                                    <FiClock className="w-4 h-4" />
+                                                    {booking.booking_time} ({booking.booking_duration}h)
+                                                </p>
+                                                <p className="flex items-center gap-1">
+                                                    <FiUser className="w-4 h-4" />
+                                                    {booking.user?.First_Name} {booking.user?.Last_Name}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-primary-600 dark:text-gray-400">
-                                            <p className="flex items-center gap-1">
-                                                <FiCalendar className="w-4 h-4" />
-                                                {formatDate(booking.venue_booking_date)}
-                                            </p>
-                                            <p className="flex items-center gap-1">
-                                                <FiClock className="w-4 h-4" />
-                                                {booking.venue_booking_time} ({booking.venue_booking_duration}h)
-                                            </p>
-                                            <p className="flex items-center gap-1">
-                                                <FiUser className="w-4 h-4" />
-                                                {booking.user?.First_Name} {booking.user?.Last_Name}
-                                            </p>
+                                        <div className="flex items-center">
+                                            {renderStatusActions('venue', booking)}
                                         </div>
-                                    </div>
-                                    <div className="flex items-center">
-                                        {renderStatusActions('venue', booking)}
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
+                    )}
+                </Card.Content>
+            </Card>
+
+            {/* Venue Return Section */}
+            <Card>
+                <Card.Header>
+                    <Card.Title className="text-xl font-serif flex items-center">
+                        <FiCheck className="mr-2" />
+                        Venue Return
+                    </Card.Title>
+                </Card.Header>
+                <Card.Content>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-serif font-medium text-primary-700 dark:text-gray-300 mb-2">
+                                Select Confirmed Venue Booking
+                            </label>
+                            <select
+                                value={selectedVenueForReturn}
+                                onChange={(e) => setSelectedVenueForReturn(e.target.value)}
+                                className="w-full px-4 py-3 font-literary border border-primary-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-primary-900 dark:text-white focus:outline-none focus:ring-4 focus:ring-primary-500/20 dark:focus:ring-primary-400/20 focus:border-primary-500 dark:focus:border-primary-400 transition-all duration-300"
+                            >
+                                <option value="">Select a confirmed venue booking...</option>
+                                {confirmedVenueBookings.map((booking) => (
+                                    <option key={booking._id} value={booking._id}>
+                                        {booking.venue?.venue_unit} - {formatDate(booking.booking_date || booking.venue_booking_date)} at {booking.booking_time} ({booking.user?.First_Name} {booking.user?.Last_Name})
+                                    </option>
+                                ))}
+                            </select>
+                            {confirmedVenueBookings.length === 0 && (
+                                <p className="text-xs text-primary-500 dark:text-gray-400 mt-2">
+                                    No confirmed venue bookings available for return
+                                </p>
+                            )}
+                        </div>
+                        <Button
+                            onClick={handleManualVenueReturn}
+                            variant="primary"
+                            className="w-full"
+                            loading={returnLoading}
+                            disabled={!selectedVenueForReturn || returnLoading}
+                            icon={FiCheck}
+                        >
+                            Mark Venue as Returned
+                        </Button>
                     </div>
-                )}
-            </Card.Content>
-        </Card>
+                </Card.Content>
+            </Card>
+        </div>
     );
 
     if (loading) {
